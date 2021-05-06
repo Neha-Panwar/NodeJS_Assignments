@@ -5,8 +5,7 @@ const bodyParser = require('body-parser');
 const session = require('express-session');
 const csrf = require('csurf');
 const flash = require('connect-flash');
-
-//initialize sequelize with session store
+const multer = require('multer');
 const SequelizeStore = require('connect-session-sequelize')(session.Store);
 
 const errorController = require('./controllers/error');
@@ -25,26 +24,33 @@ const OrderItem = require('./models/order-item');
 
 const app = express();
 
+const fileStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, 'images');
+    },
+    filename: (req, file, cb) => {
+      cb(null, file.originalname);
+    } 
+  });
+  
+  const fileFilter = (req, file, cb) => {
+    if(file.mimetype === 'image/png' || file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg') {
+        cb(null, true);
+    }
+    else {
+      cb(null, false);
+    }
+  };
+
 app.set('view engine', 'ejs');
 app.set('views', 'views');
 
-/**
- * With  promise we use function like then() and catch()
- * These are function which we can chain onto the result of execute call
- * Promise is basic js object, not specific to node
- * Its allows us to work with asynchronous code, without using callbacks
-
- */
-// db.execute('select * from products')
-//     .then((result) => {
-//         console.log(result[0], result[1]);
-//     })
-//     .catch((err) => {
-//         console.log(err);
-//     });
 
 app.use(bodyParser.urlencoded({ extended: false }));
+app.use(multer({ storage: fileStorage , fileFilter: fileFilter}).single('image'));
+
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/images', express.static(path.join(__dirname, 'images')));
 
 const store = new SequelizeStore({
     db: sequelize
@@ -53,7 +59,6 @@ const store = new SequelizeStore({
 const csrfProtection = csrf();
 
 //Initialising session middleware
-
 app.use(session({
     secret: 'my secret', 
     resave: false, 
@@ -67,18 +72,6 @@ store.sync();
 app.use(csrfProtection);
 app.use(flash());
 
-app.use((req, res, next) => {
-   if(!req.session.user) {
-     return next();
-   }
-   User.findByPk(req.session.user.id)
-    .then(user => {
-        req.user = user;
-        next();
-    })
-    .catch(err => console.log(err));
-});
-
 //For every request this would be added whenever we render any view 
 app.use((req, res, next) => {
     res.locals.isAuthenticated = req.session.isLoggedIn;
@@ -86,24 +79,43 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use((req, res, next) => {
+   if(!req.session.user) {
+     return next();
+   }
+   User.findByPk(req.session.user.id)
+    .then(user => {
+        if(!user) {
+            next();
+        }
+        req.user = user;
+        next();
+    })
+    .catch(err => {
+        next(new Error(err));
+    });
+});
+
+
+
 app.use('/admin', adminRoutes);
 app.use(shopRoutes);
 app.use(authRoutes);
 
+app.get('/500', errorController.get500);
 
 app.use(errorController.get404);
 
-/**
- * sequelize.sync() will go through all the models in our application
- * and assign tables for them.
- * If no table in database, it will create one
- * If table is there then it will load it for the particular model
- * Then we can listen to the result of this i.e what we get back as response
- * We can also catch the potential errors that occured
- * And lets say we only want to start the server when this is successful
- */
+app.use((error, req, res, next) => {
+    res.status(500).render('500', {
+        pageTitle: 'Error',
+        path: '/500',
+        data: error,
+        isAuthenticated: req.session.isLoggedIn
+    });
+});
 
-// Product.belongsTo(User);
+
 Product.belongsTo(User, {
     constraints: true, 
     onDelete: 'CASCADE'
@@ -121,22 +133,16 @@ Product.belongsToMany(Cart, {through: CartItem});
 Order.belongsTo(User);
 User.hasMany(Order);
 
-Order.belongsToMany(Product, {through : OrderItem});
+
+Order.hasMany(OrderItem);
+OrderItem.belongsTo(Order);
+
 
 
 sequelize.sync().then(result => {
-
     app.listen(3000);
 })
 .catch(err => {
     console.log(err);
 });
 
-
-
-// sequelize.sync().then(result => {
-//     app.listen(3000);
-// })
-// .catch(err => {
-//     console.log(err);
-// });

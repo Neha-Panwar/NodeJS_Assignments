@@ -1,10 +1,11 @@
-// const products = [];
+const fs = require('fs');
+const path = require('path');
+
+const PDFDocument = require('pdfkit');
 
 const Product = require('../models/product');
-
-//We can access them as they are associated to user
-// const Cart = require('../models/cart');
-// const Order = require('../models/order');
+const Order = require('../models/order');
+const OrderItem = require('../models/order-item');
 
 
 exports.getProducts = (req, res, next) => {
@@ -15,11 +16,12 @@ exports.getProducts = (req, res, next) => {
                 pageTitle: 'All Products', 
                 prods: products, 
                 path: '/products'
-                // isAuthenticated: req.session.isLoggedIn
             });
         })
         .catch(err => {
-            console.log(err);
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
         });
     
 };
@@ -28,32 +30,19 @@ exports.getProduct = (req, res, next) => {
 
     const prodId = req.params.productId;
 
-    //Using findAll() along with where condition
     Product.findAll({where: { id: prodId } })
         .then(products => {
             res.render('shop/product-detail', {
                 pageTitle: products[0].title, 
                 product: products[0], 
                 path: '/products'
-                // isAuthenticated: req.session.isLoggedIn
             });
         })
         .catch(err => {
-            console.log(err);
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
         });
-
-    /* Using findByPk() method of sequelize, in earlier versions it was findById()
-
-    Product.findByPk(prodId)
-        .then((product) => {
-            res.render('shop/product-detail', {
-                product: product,
-                pageTitle: product.title,
-                path: '/products'
-            });
-        })
-        .catch(err => console.log(err));
-    */
 };
 
 exports.getIndex = (req, res, next) => {
@@ -67,7 +56,9 @@ exports.getIndex = (req, res, next) => {
             });
         })
         .catch(err => {
-            console.log(err);
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
         });
 };
 
@@ -75,7 +66,6 @@ exports.getCart = (req, res, next) => {
 
     req.user.getCart()
         .then(cart => {
-            // console.log(cart);
             return cart.getProducts();
         })
         .then(products => {
@@ -83,10 +73,13 @@ exports.getCart = (req, res, next) => {
                 pageTitle: 'Your Cart',
                 path: '/cart',
                 products: products
-                // isAuthenticated: req.session.isLoggedIn
             });
         })
-        .catch(err => console.log(err));
+        .catch(err => {
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
+        });
 
 }
 
@@ -114,7 +107,7 @@ exports.postCart = (req, res, next) => {
         }
 
         //adding the product for 1st time
-        return Product.findByPk(prodId)
+        return Product.findByPk(prodId);
            
     })
     .then(product => {
@@ -125,13 +118,12 @@ exports.postCart = (req, res, next) => {
     .then(() => {
         res.redirect('/cart');
     })
-    .catch(err => console.log(err));
+    .catch(err => {
+        const error = new Error(err);
+        error.httpStatusCode = 500;
+        return next(error);
+    });
 
-
-    // Product.findById(prodId, (product) => {
-    //     Cart.addProduct(prodId, product.price);
-    // });
-    // res.redirect('/cart');
 };
 
 exports.postCartDeleteProduct = (req, res, next) => {
@@ -147,13 +139,12 @@ exports.postCartDeleteProduct = (req, res, next) => {
         .then(result => {
             res.redirect('/cart');
         })
-        .catch(err => console.log(err));
+        .catch(err => {
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
+        });
 
-
-    // Product.findById(prodId, product => {
-    //     Cart.deleteProduct(prodId, product.price);
-    //     res.redirect('/cart');
-    // });
 }
 
 exports.postOrder = (req, res, next) => {
@@ -167,11 +158,9 @@ exports.postOrder = (req, res, next) => {
             // console.log(products);
             return req.user.createOrder()
                 .then(order => {
-                    // order.addProduct(products, {through: .....});
-                    return order.addProduct(products.map(product => {
-                        product.orderItem = {quantity: product.cartItem.quantity};
-                        return product;
-                    }));
+                    products.forEach(product => {
+                        order.createOrderItem({ productname: product.title, productprice: product.price, quantity: product.cartItem.quantity});
+                    })
                 })
                 .catch(err => console.log(err));
         })
@@ -181,27 +170,93 @@ exports.postOrder = (req, res, next) => {
         .then(() => {
             res.redirect('/orders');
         })
-        .catch(err => console.log(err));
+        .catch(err => {
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
+        });
 };
 
 
 exports.getOrders = (req, res, next) => {
-    req.user.getOrders({include: ['products']})
+    req.user.getOrders({include: {model:OrderItem}})
         .then(orders => {
             res.render('shop/orders', {
                 pageTitle: 'Your Orders',
                 path: '/orders',
                 orders: orders
-                // isAuthenticated: req.session.isLoggedIn
             });
         })
-        .catch(err => console.log(err));
+        .catch(err => {
+            const error = new Error(err);
+            error.httpStatusCode = 500;
+            return next(error);
+        });
     
 };
 
-// exports.getCheckout = (req, res, next) => {
-//     res.render('shop/checkout', {
-//         pageTitle: 'Checkout',
-//         path: '/checkout'
-//     });
-// };
+//Downloading invoice file as pdf (only authorized user)
+exports.getInvoice = (req, res, next) => {
+    const orderId = req.params.orderId;
+    
+    OrderItem.findAll({
+                        where: {orderId: orderId},
+                        include: [Order] 
+    })
+    .then(orderItems =>{
+
+
+        if(orderItems.length < 1) {
+            return next(new Error("No order found."));
+        }
+
+        if(orderItems[0].order.userId !== req.user.id){
+            return next(new Error("Unauthorized."));
+        }
+
+        const invoiceName = 'invoice-' + orderId + '.pdf';
+        const invoicePath = path.join('data', 'invoices', invoiceName);
+        
+
+        //Creating pdf on fly
+        const pdfDoc = new PDFDocument();
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader(
+          'Content-Disposition', 
+          'inline; filename="' + invoiceName + '"'
+        );
+
+        pdfDoc.pipe(fs.createWriteStream(invoicePath));
+        pdfDoc.pipe(res);
+  
+        pdfDoc.fontSize(26).text('Invoice', {
+          underline: true
+        });
+
+        pdfDoc.text('--------------------------');
+        let totalPrice = 0;
+
+        orderItems.forEach(item => {
+            totalPrice = totalPrice + item.quantity * item.productprice;
+            // console.log("****"+item.product.title+ "****"+ item.product.price+"***"+item.quantity+"***");
+
+            pdfDoc.fontSize(14).text(
+                item.productname + 
+                ' : ' + 
+                item.quantity + 
+                ' x ' + 
+                ' $' + 
+                item.productprice
+            );
+        });
+        
+        pdfDoc.text('------');
+        pdfDoc.fontSize(16).text("Total Price: $" + totalPrice);
+  
+        pdfDoc.end();
+    })
+    .catch(err => {
+        next(err);
+    });
+    
+  };

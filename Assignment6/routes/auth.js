@@ -12,11 +12,13 @@ router.post('/login',
     [
         body('email')
             .isEmail()
-            .withMessage('Please enter a valid email.'),
+            .withMessage('Please enter a valid email.')
+            .normalizeEmail(),
         
         body('password', 'Please enter a valid password')
             .isLength({min: 5})
             .isAlphanumeric()
+            .trim()
     ],
 
     authController.postLogin
@@ -30,26 +32,19 @@ router.post('/signup',
         .isEmail()
         .withMessage('Please enter a valid email.')
         .custom((value,{req}) => {
-            // //dummy validation
-            // if(value === 'test@test.com'){
-            //     throw new Error('This email address is forbidden');
-            // }
-            // return true;
-
             return User.findOne({where : {email: value}})
             .then(userDoc => {
                 if(userDoc){
                     return Promise.reject('Email already exists! Please select different email');
                 }
             });
-        }),
+        })
+        .normalizeEmail(),
 
-    body(
-        'password', 
-        'Please enter a password with only numbers and text and atleast 5 characters'
-    )
+    body('password', 'Please enter a password with only numbers and text and atleast 5 characters')
         .isLength({min: 5})
-        .isAlphanumeric(),
+        .isAlphanumeric()
+        .trim(),
     
     body('confirmPassword')
         .custom((value, {req}) => {
@@ -58,21 +53,12 @@ router.post('/signup',
             }
             return true;
         })
+        .trim()
     ],
 
     authController.postSignup
 );
 
 router.post('/logout', authController.postLogout);
-
-router.get('/reset', authController.getReset);
-
-router.post('/reset', authController.postReset);
-
-router.get('/reset/:token', authController.getNewPassword);
-
-router.post('/new-password', authController.postNewPassword);
-
-
 
 module.exports = router;
